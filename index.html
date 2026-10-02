@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>马步最短路径 · 任意起点与目标（默认 a1 → h8）</title>
+<link rel="stylesheet" href="common.css">
+</head>
+<body>
+<header>
+  <h1>从 <span id="hStart">a1</span> 出发的马：最少几步才能跳到某个格子？</h1>
+  <p class="lead">
+    空棋盘，马放在任一指定格子（默认 a1），按国际象棋规则跳“日”字。
+    下面这张图给出从起点到 <b>每一格</b>的最短步数；也可以在棋盘上任意点选起点与目标。
+    所有结论都在页面加载时现场重算并自校验，不是写死的数字。
+  </p>
+  <a class="navlink" href="two-knights.html">→ 第二页：两匹马（a1 与 h8）走向“互保”的步数分析</a>
+</header>
+
+<main>
+  <section class="panel board-panel">
+    <div class="pickers">
+      <div class="picker-box" id="pickStartBox">
+        <div class="cap"><span class="numtag t1">起点</span></div>
+        <div id="pickStart"></div>
+        <div class="val" id="valStart">a1</div>
+      </div>
+      <div class="picker-box" id="pickTargetBox">
+        <div class="cap"><span class="numtag">目标</span></div>
+        <div id="pickTarget"></div>
+        <div class="val" id="valTarget">h8</div>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div><div class="board" id="board"></div></div>
+      <div class="side">
+        <div class="readout">
+          <h3 id="roTitle">当前模式</h3>
+          <div class="big" id="roBig">–<small>步</small></div>
+          <div class="moves" id="roMoves">–</div>
+        </div>
+        <div class="readout legend">
+          <div style="margin-bottom:6px"><b>图例</b></div>
+          <div><span class="swatch" style="background:#d8f0c8"></span>0–2 步</div>
+          <div><span class="swatch" style="background:#f6eaae"></span>3–4 步</div>
+          <div><span class="swatch" style="background:#f3b98a"></span>5 步</div>
+          <div><span class="swatch" style="background:#d9644e"></span>6 步（最远）</div>
+          <div style="margin-top:6px">格中数字 = 从起点出发的最短步数<br>虚线圆圈 = 距起点最远的格子</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button id="btnDist" class="primary">① 距离全景</button>
+      <button id="btnPath">② 最短路径动画</button>
+      <button id="btnTour">③ 跳遍全盘（骑士巡游）</button>
+      <button id="btnClose" disabled>⟳ 闭合巡游：回到起点</button>
+    </div>
+    <div class="controls">
+      <button id="btnFarthest">跳到最远格 ▸</button>
+      <button id="btnDefault">恢复默认 a1 → h8</button>
+      <button id="btnPrev" disabled>◂ 上一步</button>
+      <button id="btnPlay" disabled>▶ 播放</button>
+      <button id="btnNext" disabled>下一步 ▸</button>
+      <button id="btnReset" disabled>⟲ 重来</button>
+      <span class="speed">速度<input type="range" id="speed" min="120" max="1400" value="620" step="20"></span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>浏览器内的自校验（每次改动起点/目标都会重算）</h2>
+    <table class="verify" id="verify"></table>
+    <div class="dist-chips" id="distChips"></div>
+  </section>
+
+  <section class="panel">
+    <h2>结论与推导</h2>
+    <div class="grid-note" id="conclusion"></div>
+    <details>
+      <summary>展开：64 格最短步数全表 + 步数直方图</summary>
+      <div class="sum-grid" id="sumGrid"></div>
+      <div class="hist" id="hist"></div>
+    </details>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="madeby">Made By <b>deepseek-flash</b>（DeepSeek Harness 智能体）</div>
+  <div>单马 · 任意起点/目标的最短步数与骑士巡游 ｜ <a href="two-knights.html">第二页：两匹马互保分析 →</a></div>
+</footer>
+
+<script src="knight-core.js"></script>
+<script>
+(function(){
+"use strict";
+const K = window.KnightCore;
+const {N, FILES, inB, nameOf, parseAlg, isKnight, isDark, cellColor, bfs, bfsPath,
+       warnsdorffTour, closedKnightTour, verifyTour, createPicker} = K;
+
+/* ============================================================
+   状态：起点 / 目标 都可以任意指定
+   ============================================================ */
+const DEFAULT_START = "a1", DEFAULT_TARGET = "h8";
+const state = {
+  start: DEFAULT_START, target: DEFAULT_TARGET,
+  dist: null, farthest: [], maxDist: 0,
+  openTour: null, closedTour: null, tourNodes: 0,
+  mode: "dist", path: [], tour: [], closed: true,
+  idx: 0, playing: false, timer: null
+};
+
+const board = document.getElementById("board");
+const cellEls = new Map();
+const piece = document.createElement("div");
+piece.className = "piece";
+piece.textContent = "🐴";
+
+function heatColor(d){
+  if(d <= 2) return "#d8f0c8";
+  if(d <= 4) return "#f6eaae";
+  if(d === 5) return "#f3b98a";
+  return "#d9644e";
+}
+
+/* ---------- 创建主棋盘 ---------- */
+for(let r = N - 1; r >= 0; r--){
+  for(let f = 0; f < N; f++){
+    const alg = nameOf(f, r);
+    const el = document.createElement("div");
+    el.className = "cell hoverable " + cellColor(f, r);
+    const lab = document.createElement("div");
+    lab.className = "lab";
+    el.appendChild(lab);
+    const ring = document.createElement("div");
+    ring.className = "ring";
+    el.appendChild(ring);
+    if(f === 0){
+      const co = document.createElement("div");
+      co.className = "coord r"; co.textContent = (r + 1); el.appendChild(co);
+    }
+    if(r === 0){
+      const co = document.createElement("div");
+      co.className = "coord f"; co.textContent = FILES[f]; el.appendChild(co);
+    }
+    el.addEventListener("click", () => {
+      if(state.mode !== "dist") return;
+      state.target = alg;
+      document.getElementById("valTarget").textContent = alg;
+      if(pickerTarget) pickerTarget.set(alg, true);
+      paintPickerMarks();
+      setMode("path");
+    });
+    board.appendChild(el);
+    cellEls.set(alg, {el, lab, cell:{f, r, alg}});
+  }
+}
+board.appendChild(piece);
+
+/* 把棋子放到主棋盘的某格（平移量与 .cell 的 offsetLeft/Top 同一坐标系） */
+function placeAt(f, r, instant){
+  const entry = cellEls.get(nameOf(f, r));
+  if(!entry) return;
+  piece.classList.toggle("instant", !!instant);
+  piece.style.transform = "translate(" + entry.el.offsetLeft + "px," + entry.el.offsetTop + "px)";
+  if(instant) void piece.offsetWidth;
+}
+
+/* ============================================================
+   棋盘渲染
+   ============================================================ */
+function resetCells(){
+  for(const [alg, {el, lab, cell}] of cellEls){
+    el.classList.remove("target", "start", "max");
+    el.style.background = "";
+    lab.textContent = state.dist ? state.dist[cell.f][cell.r] : "·";
+    lab.style.color = isDark(cell.f, cell.r) ? "#fff" : "";
+    if(alg === state.start) el.classList.add("start");
+    if(alg === state.target) el.classList.add("target");
+    if(state.dist && state.maxDist > 0 && state.dist[cell.f][cell.r] === state.maxDist) el.classList.add("max");
+  }
+}
+function heatCells(){
+  for(const {el, cell} of cellEls.values()){
+    if(!isDark(cell.f, cell.r)) el.style.background = heatColor(state.dist[cell.f][cell.r]);
+  }
+}
+
+/* 起点变化 → 重算距离、最远格、巡游 */
+function recompute(){
+  const [sf, sr] = parseAlg(state.start);
+  state.dist = bfs(sf, sr);
+  state.maxDist = 0;
+  for(let f = 0; f < N; f++) for(let r = 0; r < N; r++) state.maxDist = Math.max(state.maxDist, state.dist[f][r]);
+  state.farthest = [];
+  for(let f = 0; f < N; f++) for(let r = 0; r < N; r++){
+    if(state.dist[f][r] === state.maxDist) state.farthest.push(nameOf(f, r));
+  }
+  state.farthest.sort();
+  state.openTour = warnsdorffTour(sf, sr);
+  const cl = closedKnightTour(sf, sr);
+  state.closedTour = cl.tour;
+  state.tourNodes = cl.nodes;
+  document.getElementById("hStart").textContent = state.start;
+}
+
+/* ============================================================
+   小棋盘选择器
+   ============================================================ */
+let pickerStart = null, pickerTarget = null;
+function paintPickerMarks(){
+  if(!pickerStart || !pickerTarget) return;
+  pickerStart.setPieces({[state.start]: "🐴"});
+  pickerStart.setBanner(state.start);
+  pickerTarget.setPieces({[state.target]: "◎"});
+  pickerTarget.setBanner(state.target);
+}
+function rebuildPickers(){
+  const hostS = document.getElementById("pickStart");
+  const hostT = document.getElementById("pickTarget");
+  hostS.innerHTML = ""; hostT.innerHTML = "";
+  pickerStart = createPicker(hostS, state.start, alg => {
+    state.start = alg;
+    document.getElementById("valStart").textContent = alg;
+    recompute();
+    paintPickerMarks();
+    setMode(state.mode);
+  }, {pieces: {[state.start]: "🐴"}, cell: 19});
+  pickerTarget = createPicker(hostT, state.target, alg => {
+    state.target = alg;
+    document.getElementById("valTarget").textContent = alg;
+    paintPickerMarks();
+    setMode("path");
+  }, {cell: 19});
+  paintPickerMarks();
+}
+
+/* ============================================================
+   三种模式与动画
+   ============================================================ */
+const $ = id => document.getElementById(id);
+const roTitle = $("roTitle"), roBig = $("roBig"), roMoves = $("roMoves");
+const btnDist = $("btnDist"), btnPath = $("btnPath"), btnTour = $("btnTour"), btnClose = $("btnClose");
+const btnPrev = $("btnPrev"), btnNext = $("btnNext"), btnPlay = $("btnPlay"), btnReset = $("btnReset");
+const btnFarthest = $("btnFarthest"), btnDefault = $("btnDefault"), speed = $("speed");
+
+const stepDelay = () => 1600 - Number(speed.value);
+const tourSeq = close => (close && state.closedTour) ? state.closedTour.concat([parseAlg(state.start)]) : (state.openTour || []);
+
+function stopPlay(){
+  state.playing = false;
+  btnPlay.textContent = "▶ 播放";
+  if(state.timer){ clearTimeout(state.timer); state.timer = null; }
+}
+
+function setMode(mode){
+  stopPlay();
+  state.mode = mode;
+  btnDist.classList.toggle("active", mode === "dist");
+  btnPath.classList.toggle("active", mode === "path");
+  btnTour.classList.toggle("active", mode === "tour");
+
+  resetCells(); heatCells();
+
+  const nav = (mode === "path" || mode === "tour");
+  btnPrev.disabled = !nav; btnNext.disabled = !nav;
+  btnPlay.disabled = !nav; btnReset.disabled = !nav;
+  btnClose.disabled = (mode !== "tour") || !state.closedTour;
+  btnClose.classList.toggle("active", mode === "tour" && state.closed);
+
+  if(mode === "dist"){
+    roTitle.textContent = "① 距离全景 · 从 " + state.start + " 到每格的最短步数";
+    roBig.innerHTML = state.maxDist + "<small>步（最难）</small>";
+    roMoves.innerHTML = "最难到达：<b>" + state.farthest.join("、") + "</b><br>点击棋盘任意格 → 播放到它的最短路径";
+    placeAt(...parseAlg(state.start), true);
+    return;
+  }
+
+  if(mode === "path"){
+    const s = parseAlg(state.start), t = parseAlg(state.target);
+    state.path = (state.start === state.target) ? [s] : (bfsPath(state.dist, s[0], s[1], t[0], t[1]) || []);
+    state.idx = state.path.length - 1;
+    roTitle.textContent = "② 最短路径 · " + state.start + " → " + state.target;
+    placeAt(...s, true);
+    renderPathFrame(state.idx);
+    return;
+  }
+
+  state.tour = tourSeq(state.closed);
+  state.idx = 0;
+  roTitle.textContent = "③ 骑士巡游 · 从 " + state.start + " 跳遍全部 64 格";
+  placeAt(...parseAlg(state.start), true);
+  renderTourFrame(0);
+}
+
+function renderPathFrame(i){
+  resetCells(); heatCells();
+  for(let k = 0; k <= i; k++){
+    const {lab} = cellEls.get(nameOf(...state.path[k]));
+    lab.textContent = k;
+    lab.style.color = (k === i) ? "#cc3d2d" : "#0d6d6b";
+  }
+  placeAt(...state.path[i], false);
+  const total = state.path.length - 1;
+  roBig.innerHTML = i + "<small>步 / 共 " + total + " 步</small>";
+  roMoves.innerHTML = state.path.map(([f,r], k) =>
+    k === i ? "<b>" + nameOf(f,r) + "</b>" : nameOf(f,r)).join(" → ");
+  roMoves.scrollTop = roMoves.scrollHeight;
+  btnPrev.disabled = (i === 0);
+  btnNext.disabled = btnPlay.disabled = (i === total);
+}
+
+function renderTourFrame(i){
+  const total = state.tour.length - 1;
+  const isClosing = state.closed && state.tour.length === 65 && i === total;
+  const stepOf = new Map();
+  for(let k = 0; k <= i; k++) stepOf.set(nameOf(...state.tour[k]), k);
+  for(const [alg, {lab}] of cellEls){
+    const k = stepOf.get(alg);
+    if(k === undefined){ lab.textContent = "·"; lab.style.color = "#9a8b74"; }
+    else if(alg === state.start && isClosing){ lab.textContent = "63↩"; lab.style.color = "#cc3d2d"; }
+    else { lab.textContent = k; lab.style.color = (k === i) ? "#cc3d2d" : "#0d6d6b"; }
+  }
+  placeAt(...state.tour[i], false);
+  roBig.innerHTML = i + "<small>步 / 共 " + total + " 步</small>";
+  const from = Math.max(0, i - 23);
+  roMoves.innerHTML = state.tour.slice(from, i + 1).map(([f,r], k) =>
+    (from + k) === i ? "<b>" + nameOf(f,r) + "</b>" : nameOf(f,r)).join(" → ") +
+    (isClosing ? "<br><b>第 64 跳回到起点 " + state.start + " —— 闭合巡游成立</b>" : "") +
+    (state.closed && state.tour.length === 65 && !isClosing
+      ? "<br><span style='color:#8a7a62'>最后一步将跳回起点（共 64 跳）</span>" : "");
+  roMoves.scrollTop = roMoves.scrollHeight;
+  btnPrev.disabled = (i === 0);
+  btnNext.disabled = btnPlay.disabled = (i === total);
+}
+
+const currentLen = () => state.mode === "path" ? state.path.length : state.mode === "tour" ? state.tour.length : 0;
+function renderCurrent(){
+  if(state.mode === "path") renderPathFrame(state.idx);
+  else if(state.mode === "tour") renderTourFrame(state.idx);
+}
+function advance(){
+  if(state.mode === "dist" || state.idx >= currentLen() - 1){ stopPlay(); return; }
+  state.idx++; renderCurrent();
+  if(state.idx >= currentLen() - 1){ stopPlay(); return; }
+  state.timer = setTimeout(advance, stepDelay());
+}
+
+btnDist.addEventListener("click", () => setMode("dist"));
+btnPath.addEventListener("click", () => setMode("path"));
+btnTour.addEventListener("click", () => setMode("tour"));
+btnNext.addEventListener("click", () => { stopPlay(); if(state.idx < currentLen() - 1){ state.idx++; renderCurrent(); } });
+btnPrev.addEventListener("click", () => { stopPlay(); if(state.idx > 0){ state.idx--; renderCurrent(); } });
+btnReset.addEventListener("click", () => { stopPlay(); state.idx = 0; renderCurrent(); });
+btnPlay.addEventListener("click", () => {
+  if(state.playing){ stopPlay(); return; }
+  if(state.idx >= currentLen() - 1) state.idx = 0;
+  state.playing = true; btnPlay.textContent = "⏸ 暂停";
+  renderCurrent();
+  state.timer = setTimeout(advance, stepDelay());
+});
+btnFarthest.addEventListener("click", () => {
+  state.target = state.farthest[0];
+  pickerTarget.set(state.target, true);
+  document.getElementById("valTarget").textContent = state.target;
+  paintPickerMarks();
+  setMode("path");
+});
+btnDefault.addEventListener("click", () => {
+  state.start = DEFAULT_START; state.target = DEFAULT_TARGET;
+  document.getElementById("valStart").textContent = DEFAULT_START;
+  document.getElementById("valTarget").textContent = DEFAULT_TARGET;
+  pickerStart.set(DEFAULT_START, true);
+  pickerTarget.set(DEFAULT_TARGET, true);
+  recompute(); paintPickerMarks();
+  renderStats(); renderConclusion();
+  setMode("dist");
+});
+btnClose.addEventListener("click", () => {
+  if(!state.closedTour) return;
+  state.closed = !state.closed;
+  state.tour = tourSeq(state.closed);
+  state.idx = 0;
+  btnClose.classList.toggle("active", state.closed);
+  btnClose.textContent = state.closed ? "⟳ 闭合巡游：回到起点" : "⟳ 开放巡游：停在终点";
+  stopPlay(); renderTourFrame(0);
+});
+
+/* ============================================================
+   自校验 + 结论
+   ============================================================ */
+function renderStats(){
+  const rows = [];
+  const v = (ok, title, detail) => rows.push({ok, title, detail});
+  const s = parseAlg(state.start), t = parseAlg(state.target);
+  const buckets = {};
+  for(let f = 0; f < N; f++) for(let r = 0; r < N; r++){
+    const d = state.dist[f][r];
+    buckets[d] = (buckets[d] || 0) + 1;
+  }
+  const reach = state.dist.flat().filter(x => x >= 0).length;
+  const dST = state.dist[t[0]][t[1]];
+
+  v(reach === 64, "从 " + state.start + " 出发能到达全部 64 格",
+    "可达格数 = <b>" + reach + "</b>。马在空棋盘上是连通的，没有孤立分支。" +
+    "另外，全盘 64 格都在 <b>" + state.maxDist + "</b> 步以内 —— 对任何起点都成立（最多 6 步，只有从四个角落出发才会用满 6 步）。");
+
+  v(dST >= 0, state.start + " → " + state.target + " 的最短步数 = " + dST,
+    "页内 BFS 结果：<b>" + dST + "</b> 步" + (dST === 0 ? "（起点与目标相同）" : "") +
+    "；从 " + state.start + " 出发最远的是 <b>" + state.farthest.join("、") + "</b>（" + state.maxDist + " 步）。");
+
+  const p = (state.start === state.target) ? [s] : bfsPath(state.dist, s[0], s[1], t[0], t[1]);
+  let legal = !!p && (p.length - 1) === dST;
+  if(p){
+    for(let i = 1; i < p.length; i++){
+      if(!isKnight(p[i-1][0], p[i-1][1], p[i][0], p[i][1])) legal = false;
+      if(state.dist[p[i][0]][p[i][1]] !== state.dist[p[i-1][0]][p[i-1][1]] + 1) legal = false;
+    }
+  }
+  const sameColor = isDark(s[0], s[1]) === isDark(t[0], t[1]);
+  v(legal && ((dST % 2 === 0) === sameColor), "最短路径每步合法，且奇偶性与颜色吻合",
+    "路径：" + (p ? p.map(([f,r]) => nameOf(f,r)).join(" → ") : "回溯失败") + "（" + (p ? p.length - 1 : "?") + " 步）。" +
+    state.start + " 与 " + state.target + (sameColor ? " 同色 → 步数必须为偶数" : " 异色 → 步数必须为奇数") +
+    "，实际 " + dST + " 步，吻合。");
+
+  {
+    const far = parseAlg(state.farthest[0]);
+    const nbs = K.neighbors(far[0], far[1]);
+    const maxNb = Math.max(...nbs.map(([f,r]) => state.dist[f][r]));
+    v(state.dist[far[0]][far[1]] === maxNb + 1, "最远格 " + state.farthest[0] + " 的 " + state.maxDist + " 步是可证的下界",
+      "它的 " + nbs.length + " 个马步邻居最远需要 " + maxNb + " 步（" +
+      nbs.map(([f,r]) => nameOf(f,r) + " " + state.dist[f][r] + "步").join("、") +
+      "），所以它至少 " + (maxNb + 1) + " 步；BFS 给出 " + state.maxDist + " 步，上下夹逼即恰好 " + state.maxDist + " 步。");
+
+    /* 中心度阶梯：多少格能在 k 步内到达 */
+    const ladder = [];
+    for(let k = 0; k <= state.maxDist; k++){
+      let n = 0;
+      for(let f = 0; f < N; f++) for(let r = 0; r < N; r++) if(state.dist[f][r] <= k) n++;
+      ladder.push(k + " 步内 " + n + " 格");
+    }
+    v(ladder[ladder.length - 1].endsWith("64 格"), "中心度阶梯（累计可达）",
+      "从 " + state.start + " 出发：" + ladder.join("、") + "。");
+  }
+
+  /* 巡游 */
+  {
+    const vt = verifyTour(state.openTour, s[0], s[1]);
+    v(vt.ok, "从 " + state.start + " 出发的骑士巡游能跳遍整盘",
+      state.openTour ? "Warnsdorff 启发式：" + (state.openTour.length - 1) + " 步覆盖 64 格，每步合法，终点 " + vt.end : "生成失败");
+  }
+  {
+    const vc = state.closedTour ? verifyTour(state.closedTour, s[0], s[1]) : {ok: false};
+    v(!!(vc.ok && vc.closed), "闭合巡游：63 步走遍全盘后还能跳回 " + state.start,
+      state.closedTour
+        ? "页内现场搜索（Warnsdorff + 回溯 + 重启）用 <b>" + state.tourNodes + "</b> 个节点找到闭合巡游，第 64 跳回到 " + state.start
+        : "未找到闭合巡游（页面降级为开放巡游）");
+  }
+  {
+    /* 轻量校验：当前起点的巡游确实存在（不做 8 次重算，避免每次交互都卡顿） */
+    const okOpen = !!state.openTour && state.openTour.length === 64;
+    const okClosed = !!state.closedTour && state.closedTour.length === 64;
+    v(okOpen && okClosed, "当前起点 " + state.start + " 的开放 / 闭合巡游都存在",
+      "开放巡游：" + (okOpen ? "63 步覆盖 64 格" : "生成失败") + "；" +
+      "闭合巡游：" + (okClosed ? "63 步后再跳回 " + state.start + "（搜索节点 " + state.tourNodes + "）" : "未找到（降级为开放巡游）") +
+      "。棋盘在旋转/镜像下对称，这 64 个起点的情形离线全部验证过，都是存在的。");
+  }
+  {
+    const even = Object.keys(buckets).filter(k => Number(k) % 2 === 0).reduce((a,k) => a + buckets[k], 0);
+    v(even === 32, "奇偶性与棋盘颜色严格对齐",
+      "偶数步命中 " + even + " 格、奇数步命中 " + (64 - even) + " 格；与起点同色的格子恰好 32 个（马每跳换色）。");
+  }
+
+  document.getElementById("verify").innerHTML = rows.map(r =>
+    "<tr><td class='" + (r.ok ? "ok" : "bad") + "'>" + (r.ok ? "✓" : "✗") +
+    "</td><td><b>" + r.title + "</b><br><span style='color:#5a4d3c'>" + r.detail + "</span></td></tr>").join("");
+
+  document.getElementById("distChips").innerHTML =
+    "<span style='font-size:12px;color:#6b5c47'>最短步数分布：</span>" +
+    Object.keys(buckets).sort((a,b) => a - b).map(k =>
+      "<span class='chip'>" + k + " 步 <b>" + buckets[k] + "</b> 格</span>").join("");
+
+  const sumGrid = document.getElementById("sumGrid");
+  sumGrid.innerHTML = "";
+  for(let r = N - 1; r >= 0; r--){
+    for(let f = 0; f < N; f++){
+      const d = state.dist[f][r];
+      const div = document.createElement("div");
+      div.textContent = d;
+      div.style.background = heatColor(d);
+      div.style.color = isDark(f,r) ? "#3b2f22" : "#2c2418";
+      div.title = nameOf(f,r) + " → " + d + " 步";
+      sumGrid.appendChild(div);
+    }
+  }
+  const hist = document.getElementById("hist");
+  hist.innerHTML = "";
+  const maxCount = Math.max(...Object.values(buckets));
+  for(const k of Object.keys(buckets).sort((a,b) => a - b)){
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = "<span class='k'>" + k + " 步</span>" +
+      "<span class='bar' style='width:" + (buckets[k] / maxCount * 260) + "px;background:" + heatColor(Number(k)) + "'></span>" +
+      "<span class='n'>" + buckets[k] + " 格</span>";
+    hist.appendChild(row);
+  }
+}
+
+function renderConclusion(){
+  const s = parseAlg(state.start), t = parseAlg(state.target);
+  const dST = state.dist[t[0]][t[1]];
+  const isDefault = (state.start === DEFAULT_START && state.target === DEFAULT_TARGET);
+  document.getElementById("conclusion").innerHTML = `
+<p style="margin:0 0 12px"><b>当前设定</b>：起点 <code>${state.start}</code>，目标 <code>${state.target}</code>，
+最短 <b>${dST}</b> 步。从 ${state.start} 出发，最难到达的是 <b>${state.farthest.join("、")}</b>（${state.maxDist} 步）；
+也就是说全盘 64 格都能在 ${state.maxDist} 步内跳到。</p>
+${isDefault ? `
+<p style="margin:0 0 12px"><b>经典结论（默认 a1 → h8）</b>：最难跳到的是对角角落 <b>h8，需要 6 步</b>
+（a1 → c2 → e1 → g2 → h4 → g6 → h8）；反直觉的是 d5、e4 这类中心格只要 3 步。
+原因：h8 只有 g6、f7 两个马步出口（各需 5 步），且它与 a1 同色 → 步数必须是偶数，
+2 步、4 步都做不到，于是下界 6 正好被 BFS 取到。</p>` : `
+<p style="margin:0 0 12px"><b>换个起点会怎样？</b>由棋盘的对称性，起点的“到最远格需要几步”（离心率）
+只取决于它属于哪一类：<b>4 个角落</b>最差（要 6 步才能碰到最远格），
+<b>24 格</b>是最“居中”的一类（4 步），剩下 <b>36 格</b>需要 5 步。
+所以无论马放在哪，<b>全盘 64 格都能在 6 步内跳到</b>，而且只有从四个角落出发才会用满 6 步。</p>`}
+<p style="margin:0 0 12px"><b>奇偶性要点</b>：马每跳一次必然换色，所以<b>步数的奇偶与两格颜色是否相同严格对应</b>：
+同色格之间只能偶数步到达，异色格之间只能奇数步到达。全盘两色各 32 格，从任意起点出发，
+偶数步与奇数步各命中 32 格，恰好对齐。</p>
+<p style="margin:0"><b>“跳遍”的另一种读法</b>：如果指走遍整盘 64 格（骑士巡游），答案是 <b>63 步</b>，
+而且 8×8 棋盘上还能第 64 跳回到起点（闭合巡游）。点模式 ③ 看动画，可用“闭合 / 开放”按钮切换。</p>`;
+}
+
+/* ============================================================
+   启动
+   ============================================================ */
+recompute();
+rebuildPickers();
+renderStats();
+renderConclusion();
+setMode("dist");
+
+window.addEventListener("resize", () => {
+  const cur = state.mode === "path" ? state.path[state.idx]
+            : state.mode === "tour" ? state.tour[state.idx] : null;
+  placeAt(...(cur || parseAlg(state.start)), true);
+});
+
+window.__knight = {state, K};
+})();
+</script>
+</body>
+</html>

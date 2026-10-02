@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>两匹马的“互保”分析 · a1 与 h8 出发需要多少步</title>
+<link rel="stylesheet" href="common.css">
+<style>
+.pattern-tabs{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:2px 0 14px}
+.pattern-tabs button{font-size:13px}
+.answer-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;margin-bottom:6px}
+.answer-card{border:1px solid #e0d5bd;border-radius:12px;padding:12px 14px;background:#f9f5ec;cursor:pointer;transition:.15s}
+.answer-card:hover{border-color:#c9b48d;background:#fdfaf3}
+.answer-card.on{border-color:var(--accent2);background:#fdf6ec;box-shadow:0 0 0 2px rgba(181,101,29,.18)}
+.answer-card h4{margin:0 0 6px;font-size:13px;color:#5f5140}
+.answer-card .num{font-size:26px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums;line-height:1.1}
+.answer-card .num small{font-size:12px;font-weight:600;color:#8a7a62;margin-left:4px}
+.answer-card .det{font-size:12px;color:#6b5c47;line-height:1.6;margin-top:6px;font-family:Consolas,monospace;word-break:break-all}
+table.rank{width:100%;border-collapse:collapse;font-size:12.5px;font-family:Consolas,monospace}
+table.rank th{text-align:left;color:#7a6a52;font-weight:600;padding:4px 8px;border-bottom:1px solid #e7ddc9;font-family:inherit}
+table.rank td{padding:4px 8px;border-bottom:1px solid #f2ece0}
+table.rank tr.best td{background:#fdf6ec;font-weight:700}
+.legendline{font-size:12px;color:#6b5c47;line-height:1.7;margin-top:8px}
+.m1t{color:var(--c1);font-weight:700}
+.m2t{color:var(--c2);font-weight:700}
+</style>
+</head>
+<body>
+<header>
+  <h1>两匹马的“<span>互保</span>”：从 a1 与 h8 出发，最少几步？</h1>
+  <p class="lead">
+    两匹马分别放在指定格子（默认 <b class="m1t">a1</b> 与 <b class="m2t">h8</b>），按国际象棋规则跳“日”字。
+    问：让它们形成<b>互保关系</b>，最少需要多少步？下面把“互保”拆成三种互不相同的定义分别求最优解，
+    并动画演示两马的同时行进过程。
+  </p>
+  <a class="navlink" href="index.html">← 回到第一页：单马到任意格的最短步数</a>
+</header>
+
+<main>
+  <section class="panel board-panel">
+    <div class="pickers">
+      <div class="picker-box c1" id="pickABox">
+        <div class="cap"><span class="numtag t1">1</span> 马 1 起点</div>
+        <div id="pickA"></div>
+        <div class="val" id="valA">a1</div>
+      </div>
+      <div class="picker-box c2" id="pickBBox">
+        <div class="cap"><span class="numtag t2">2</span> 马 2 起点</div>
+        <div id="pickB"></div>
+        <div class="val" id="valB">h8</div>
+      </div>
+    </div>
+
+    <div class="pattern-tabs">
+      <button id="patDirect" class="primary">A · 两马互相攻击</button>
+      <button id="patCommon">B · 共同保护同一空点</button>
+      <button id="patGuard">C · 一马守在另一马能攻击的点上</button>
+    </div>
+
+    <div class="stage">
+      <div><div class="board" id="board"></div></div>
+      <div class="side">
+        <div class="readout">
+          <h3 id="roTitle">当前定义</h3>
+          <div class="big" id="roBig">–<small>步</small></div>
+          <div class="moves" id="roMoves">–</div>
+        </div>
+        <div class="readout legend">
+          <div style="margin-bottom:6px"><b>图例</b></div>
+          <div><span class="swatch" style="background:#7d6a4f"></span>深色格 / <span class="swatch" style="background:#efe3cd"></span>浅色格</div>
+          <div style="margin-top:4px"><span class="m1t">■</span> 马 1 起点　<span class="m2t">■</span> 马 2 起点</div>
+          <div><span style="color:var(--accent2)">⬤</span> 互保涉及的格子（保护点 / 被保护的马）</div>
+          <div><span class="m1t">━</span> 马 1 的落点　<span class="m2t">┅</span> 马 2 的落点</div>
+          <div style="margin-top:4px">格中数字 = 该马走到此格的步数（当前回合）</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button id="btnPrev" disabled>◂ 上一回合</button>
+      <button id="btnPlay" disabled>▶ 播放</button>
+      <button id="btnNext" disabled>下一回合 ▸</button>
+      <button id="btnReset" disabled>⟲ 重来</button>
+      <button id="btnDemo">恢复默认 a1 / h8</button>
+      <span class="speed">速度<input type="range" id="speed" min="150" max="1500" value="700" step="20"></span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>三种“互保”定义下的最优解（点击卡片或上方按钮切换）</h2>
+    <div class="answer-grid" id="answerGrid"></div>
+    <div class="legendline" id="defNote"></div>
+  </section>
+
+  <section class="panel">
+    <h2>浏览器内的自校验</h2>
+    <table class="verify" id="verify"></table>
+  </section>
+
+  <section class="panel">
+    <h2>最优解排行榜（按总步数、再按回合数排序）</h2>
+    <div class="rank-wrap">
+      <table class="rank" id="rankTable"></table>
+    </div>
+    <div class="grid-note" id="conclusion" style="margin-top:12px"></div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="madeby">Made By <b>deepseek-flash</b>（DeepSeek Harness 智能体）</div>
+  <div>两匹马 · 互保三种定义的最优步数分析 ｜ <a href="index.html">← 第一页：单马最短步数</a></div>
+</footer>
+
+<script src="knight-core.js"></script>
+<script>
+(function(){
+"use strict";
+const K = window.KnightCore;
+const {N, FILES, inB, nameOf, parseAlg, isKnight, isDark, cellColor, bfs, bfsPath, neighbors,
+       mutualProtection, PATTERN_LABEL, createPicker} = K;
+
+const DEFAULT_A = "a1", DEFAULT_B = "h8";
+const state = {
+  A: DEFAULT_A, B: DEFAULT_B,
+  pattern: "direct",
+  results: {},          // pattern -> mutualProtection 结果
+  best: null,
+  round: 0, playing: false, timer: null
+};
+
+const board = document.getElementById("board");
+const cellEls = new Map();
+const pieceA = document.createElement("div");
+pieceA.className = "piece m1";
+pieceA.innerHTML = '🐴<span class="tag">1</span>';
+const pieceB = document.createElement("div");
+pieceB.className = "piece m2";
+pieceB.innerHTML = '🐴<span class="tag">2</span>';
+
+for(let r = N - 1; r >= 0; r--){
+  for(let f = 0; f < N; f++){
+    const alg = nameOf(f, r);
+    const el = document.createElement("div");
+    el.className = "cell " + cellColor(f, r);
+    const lab = document.createElement("div");
+    lab.className = "lab";
+    el.appendChild(lab);
+    const gr = document.createElement("div");
+    gr.className = "guardring";
+    el.appendChild(gr);
+    if(f === 0){
+      const co = document.createElement("div");
+      co.className = "coord r"; co.textContent = (r + 1); el.appendChild(co);
+    }
+    if(r === 0){
+      const co = document.createElement("div");
+      co.className = "coord f"; co.textContent = FILES[f]; el.appendChild(co);
+    }
+    board.appendChild(el);
+    cellEls.set(alg, {el, lab, gr, cell:{f, r, alg}});
+  }
+}
+board.appendChild(pieceA);
+board.appendChild(pieceB);
+
+function placePiece(el, f, r, instant){
+  const entry = cellEls.get(nameOf(f, r));
+  if(!entry) return;
+  el.classList.toggle("instant", !!instant);
+  el.style.transform = "translate(" + entry.el.offsetLeft + "px," + entry.el.offsetTop + "px)";
+  if(instant) void el.offsetWidth;
+}
+
+/* ============================================================
+   求解三种定义
+   ============================================================ */
+function solveAll(){
+  const a = parseAlg(state.A), b = parseAlg(state.B);
+  for(const p of ["direct", "common", "guard"]){
+    state.results[p] = mutualProtection(a[0], a[1], b[0], b[1], p, {maxRound: 7});
+  }
+}
+
+/* 判断某个候选解的终局是否满足定义（用于自校验） */
+function checkBest(pattern, best){
+  if(!best) return null;
+  const [q1f, q1r] = best.q1, [q2f, q2r] = best.q2;
+  if(pattern === "direct") return {ok: isKnight(q1f, q1r, q2f, q2r), note: nameOf(q1f,q1r) + " 与 " + nameOf(q2f,q2r) + " 相差一个马步"};
+  if(pattern === "guard")   return {ok: isKnight(q1f, q1r, q2f, q2r), note: nameOf(q2f,q2r) + " 攻击 " + nameOf(q1f,q1r)};
+  const shared = neighbors(q1f, q1r).filter(([f,r]) => isKnight(f, r, q2f, q2r));
+  return {ok: shared.length > 0, note: "共同保护 " + shared.map(([f,r]) => nameOf(f,r)).join("、")};
+}
+
+/* ============================================================
+   棋盘绘制
+   ============================================================ */
+/* 棋盘逐回合绘制：格中数字 = 各马走到该格是第几步（逐步累积，不提前剧透） */
+function paintBoard(){
+  const a = parseAlg(state.A), b = parseAlg(state.B);
+  const best = state.best;
+  const r = state.round;
+  const aPos = best ? best.p1[Math.min(r, best.m1)] : a;
+  const bPos = best ? best.p2[Math.min(r, best.m2)] : b;
+  const done = best ? r >= Math.max(best.m1, best.m2) : false;
+
+  for(const {el, lab, cell} of cellEls.values()){
+    el.classList.remove("protected", "guarded1", "guarded2", "endA", "endB");
+    lab.textContent = "";
+    lab.style.color = isDark(cell.f, cell.r) ? "#fff" : "";
+  }
+  cellEls.get(state.A).el.classList.add("startA");
+  cellEls.get(state.B).el.classList.add("startB");
+
+  if(best){
+    const mark = (path, upto) => {
+      for(let k = 0; k <= Math.min(upto, path.length - 1); k++){
+        const alg = nameOf(...path[k]);
+        const {lab} = cellEls.get(alg);
+        lab.textContent = (lab.textContent && lab.textContent !== String(k)) ? lab.textContent + "/" + k : String(k);
+      }
+    };
+    mark(best.p1, r);
+    mark(best.p2, r);
+  }
+  // 两马当前所处格显示各自的步数（先行到位的马会保持它的步数不变）
+  if(best){
+    cellEls.get(nameOf(...aPos)).lab.textContent = Math.min(r, best.m1);
+    cellEls.get(nameOf(...bPos)).lab.textContent = Math.min(r, best.m2);
+  }
+
+  if(best && done){
+    const [q1f, q1r] = best.q1, [q2f, q2r] = best.q2;
+    cellEls.get(nameOf(q1f, q1r)).el.classList.add("endA", "guarded1");
+    cellEls.get(nameOf(q2f, q2r)).el.classList.add("endB", "guarded2");
+    if(state.pattern === "common"){
+      for(const [f,rr] of neighbors(q1f, q1r)){
+        if(isKnight(f, rr, q2f, q2r)) cellEls.get(nameOf(f, rr)).el.classList.add("protected");
+      }
+    } else {
+      cellEls.get(nameOf(q1f, q1r)).el.classList.add("protected");
+      cellEls.get(nameOf(q2f, q2r)).el.classList.add("protected");
+    }
+  }
+  placePiece(pieceA, aPos[0], aPos[1], true);
+  placePiece(pieceB, bPos[0], bPos[1], true);
+}
+
+/* ============================================================
+   回合与动画
+   ============================================================ */
+const $ = id => document.getElementById(id);
+const roTitle = $("roTitle"), roBig = $("roBig"), roMoves = $("roMoves");
+const btnPrev = $("btnPrev"), btnNext = $("btnNext"), btnPlay = $("btnPlay"), btnReset = $("btnReset");
+const btnDemo = $("btnDemo"), speed = $("speed");
+
+const totalRounds = () => state.best ? Math.max(state.best.m1, state.best.m2) : 0;
+const stepDelay = () => 1650 - Number(speed.value);
+
+function stopPlay(){
+  state.playing = false;
+  btnPlay.textContent = "▶ 播放";
+  if(state.timer){ clearTimeout(state.timer); state.timer = null; }
+}
+function setRound(r){
+  state.round = Math.max(0, Math.min(r, totalRounds()));
+  paintBoard();
+  renderReadout();
+  btnPrev.disabled = (state.round === 0);
+  btnNext.disabled = btnPlay.disabled = (state.round >= totalRounds());
+}
+function advance(){
+  if(state.round >= totalRounds()){ stopPlay(); return; }
+  setRound(state.round + 1);
+  if(state.round >= totalRounds()){ stopPlay(); return; }
+  state.timer = setTimeout(advance, stepDelay());
+}
+
+function renderReadout(){
+  const best = state.best;
+  if(!best){
+    roBig.innerHTML = "–";
+    roMoves.textContent = "当前定义在搜索范围内无解。";
+    return;
+  }
+  const r = state.round, done = r >= totalRounds();
+  roTitle.textContent = "定义 " + state.pattern.toUpperCase() + " · " + PATTERN_LABEL[state.pattern];
+  roBig.innerHTML = best.total + "<small>总步数 · " + totalRounds() + " 回合</small>";
+  const p1 = best.p1.slice(0, Math.min(r, best.m1) + 1).map(([f,rr]) => nameOf(f,rr));
+  const p2 = best.p2.slice(0, Math.min(r, best.m2) + 1).map(([f,rr]) => nameOf(f,rr));
+  roMoves.innerHTML =
+    "<span class='m1text'>马1（" + state.A + "）</span> " + best.m1 + " 步：<br>" + p1.join(" → ") +
+    "<br><span class='m2text'>马2（" + state.B + "）</span> " + best.m2 + " 步：<br>" + p2.join(" → ") +
+    "<br>" + (done
+      ? "<b>✓ 终局：</b>" + best.note + "　（马1 停在 " + nameOf(...best.q1) + "，马2 停在 " + nameOf(...best.q2) + "）"
+      : "<span style='color:#8a7a62'>已走 " + r + " / " + totalRounds() + " 回合</span>");
+  roMoves.scrollTop = roMoves.scrollHeight;
+}
+
+/* ============================================================
+   结果卡片 / 排行榜 / 自校验
+   ============================================================ */
+const PATTERNS = ["direct", "common", "guard"];
+const SHORT = {direct: "两马互相攻击", common: "共同保护同一空点", guard: "一马守另一马"};
+const DESC = {
+  direct: "终局时两匹马彼此都是对方的合法马步落点 —— 你吃我、我也吃你，标准的“互保/互攻”关系。",
+  common: "两匹马各自站在同一个空点的马步范围内，共同保护那个点（实战里常用来守一个关键格）。",
+  guard:  "一匹马停在另一匹马能攻击到的格子上：后者负责保护前者（方向性关系，与 direct 的对称关系不同）。"
+};
+
+function renderCards(){
+  const host = $("answerGrid");
+  host.innerHTML = "";
+  for(const p of PATTERNS){
+    const R = state.results[p];
+    const b = R ? R.best : null;
+    const card = document.createElement("div");
+    card.className = "answer-card" + (p === state.pattern ? " on" : "");
+    card.innerHTML = "<h4>" + p.toUpperCase() + " · " + SHORT[p] + "</h4>" +
+      (b
+        ? "<div class='num'>" + b.total + "<small>总步数</small></div>" +
+          "<div class='det'>" + totalRoundsOf(R) + " 回合 ｜ 马1 " + b.m1 + " 步 → " + nameOf(...b.q1) +
+          "<br>马2 " + b.m2 + " 步 → " + nameOf(...b.q2) + "<br>" + b.note + "</div>"
+        : "<div class='num'>无解</div><div class='det'>搜索范围内没有满足该定义的终局</div>");
+    card.addEventListener("click", () => selectPattern(p));
+    host.appendChild(card);
+  }
+}
+const totalRoundsOf = R => R.best ? Math.max(R.best.m1, R.best.m2) : 0;
+
+function renderRank(){
+  const R = state.results[state.pattern];
+  const t = $("rankTable");
+  if(!R || !R.candidates.length){ t.innerHTML = "<tr><td>无候选解</td></tr>"; return; }
+  const rows = R.candidates.slice(0, 8);
+  t.innerHTML = "<tr><th>#</th><th>总步数</th><th>回合</th><th>马1</th><th>马2</th><th>终局关系</th></tr>" +
+    rows.map((c, i) => "<tr class='" + (i === 0 ? "best" : "") + "'><td>" + (i + 1) + "</td><td>" + c.total +
+      "</td><td>" + c.rounds + "</td><td>" + c.m1 + " 步 → " + nameOf(...c.q1) +
+      "</td><td>" + c.m2 + " 步 → " + nameOf(...c.q2) + "</td><td>" + c.note + "</td></tr>").join("") +
+    "<tr><td colspan='6' style='color:#8a7a62'>共 " + R.candidates.length + " 个候选终局满足该定义</td></tr>";
+}
+
+function renderVerify(){
+  const a = parseAlg(state.A), b = parseAlg(state.B);
+  const best = state.best;
+  const rows = [];
+  const v = (ok, title, detail) => rows.push({ok, title, detail});
+
+  v(true, "两马起点：" + state.A + "（马1）与 " + state.B + "（马2）",
+    "两格" + (isDark(a[0],a[1]) === isDark(b[0],b[1]) ? "同色" : "异色") +
+    "。马每跳换色，所以到某一格所需步数的奇偶由此决定：两马都从" +
+    (isDark(a[0],a[1]) ? "深色" : "浅色") + "格出发。");
+
+  if(!best){
+    v(false, "当前定义下未找到解", "可放宽搜索回合上限或换一个定义。");
+  } else {
+    const chk = checkBest(state.pattern, best);
+    v(chk.ok, "终局满足定义：" + chk.note,
+      "马1 " + best.m1 + " 步 " + state.A + " → " + nameOf(...best.q1) +
+      "；马2 " + best.m2 + " 步 " + state.B + " → " + nameOf(...best.q2) +
+      "；总步数 = " + best.m1 + "+" + best.m2 + " = <b>" + best.total + "</b>，同时行进需 " + totalRoundsOf(state.results[state.pattern]) + " 回合。");
+
+    /* 路径合法性 + 与最短距离一致 */
+    let ok = true, detail = [];
+    for(const [nm, path, dist] of [["马1", best.p1, state.results[state.pattern].distA],
+                                    ["马2", best.p2, state.results[state.pattern].distB]]){
+      let legal = path.length - 1 === (nm === "马1" ? best.m1 : best.m2);
+      for(let i = 1; i < path.length; i++){
+        if(!isKnight(path[i-1][0], path[i-1][1], path[i][0], path[i][1])) legal = false;
+      }
+      const end = path[path.length - 1];
+      if(dist[end[0]][end[1]] !== path.length - 1) legal = false;
+      if(!legal) ok = false;
+      detail.push(nm + "：" + path.map(([f,r]) => nameOf(f,r)).join("→") + "（" + (path.length - 1) + " 步）");
+    }
+    v(ok, "两条路线都是合法马步，且长度等于该格的最短距离", detail.join("；"));
+
+    /* 下界论证：是否可能更省 */
+    const R = state.results[state.pattern];
+    const cheaper = R.candidates.filter(c => c.total < best.total).length;
+    v(cheaper === 0, "总步数 " + best.total + " 是枚举范围内的最小值",
+      "枚举了全部满足定义的终局组合（" + R.candidates.length + " 个），没有任何一个的总步数低于 " + best.total +
+      "。两马同时行进时，每一回合两马各走一步，所以总步数 = 两马各自步数之和，回合数 = 两者较大者。");
+
+    /* 1 回合内不可能 */
+    const one = R.candidates.filter(c => c.rounds <= 1).length;
+    v(one === 0, "“一个回合内互保”不可能",
+      "若只需 1 回合，两马各走 1 步，落点必须满足定义；枚举后满足的组合数为 " + one +
+      "，说明这个定义下至少需要 " + totalRoundsOf(R) + " 回合（两马同时行进）。");
+  }
+
+  $("verify").innerHTML = rows.map(r =>
+    "<tr><td class='" + (r.ok ? "ok" : "bad") + "'>" + (r.ok ? "✓" : "✗") +
+    "</td><td><b>" + r.title + "</b><br><span style='color:#5a4d3c'>" + r.detail + "</span></td></tr>").join("");
+}
+
+function renderConclusion(){
+  const a = state.A, b = state.B, R = state.results;
+  const parts = PATTERNS.map(p => {
+    const r = R[p];
+    return "<li><b>" + p.toUpperCase() + " · " + SHORT[p] + "</b>：" +
+      (r.best ? "最少 <b>" + r.best.total + " 步</b>（" + totalRoundsOf(r) + " 回合）→ " +
+        "马1 到 " + nameOf(...r.best.q1) + "、马2 到 " + nameOf(...r.best.q2) + "，" + r.best.note
+        : "无解") + "</li>";
+  }).join("");
+  $("conclusion").innerHTML = `
+<p style="margin:0 0 10px"><b>当前起点</b>：马1 = <code>${a}</code>，马2 = <code>${b}</code>。三种定义的最优结果：</p>
+<ul style="margin:0 0 12px;padding-left:22px;line-height:1.9">${parts}</ul>
+<p style="margin:0 0 10px"><b>“互保”为什么有两种不同的答案？</b>因为它在国际象棋里并没有唯一含义：
+两匹马互相攻击（A）时，两马之间是<b>对称</b>关系，终局必须相差一个马步；
+而“共同保护一个点”（B）是<b>协作</b>关系，允许两马靠得更近，因此更省步数；
+“一马守另一马”（C）是<b>方向性</b>关系，本质与 A 相同的关系、不同的叙述，所以最优总步数与 A 一致。</p>
+<p style="margin:0"><b>关于“两马不能相撞”</b>：本页在计算距离时禁止任一匹马走到对方<b>出发格</b>
+（否则动画会重叠成一格）；两马在行进中也不会同时停在同一格，因为候选终局已排除同格情形。
+如果你想要的是“两马一起走、每回合各一步”，那么看<b>回合数</b>那一列；如果要的是“总共挪动多少次”，
+看<b>总步数</b>。本页同时给出两者。</p>`;
+}
+
+/* ============================================================
+   交互
+   ============================================================ */
+function selectPattern(p){
+  state.pattern = p;
+  state.best = state.results[p] ? state.results[p].best : null;
+  $("patDirect").classList.toggle("primary", p === "direct");
+  $("patCommon").classList.toggle("primary", p === "common");
+  $("patGuard").classList.toggle("primary", p === "guard");
+  $("defNote").innerHTML = "<b>当前定义（" + p.toUpperCase() + "）</b>：" + DESC[p];
+  renderCards(); renderRank(); renderVerify(); renderConclusion();
+  stopPlay();
+  setRound(totalRounds());     // 默认直接展示终局
+}
+function resolve(){
+  solveAll();
+  state.best = state.results[state.pattern] ? state.results[state.pattern].best : null;
+  renderCards(); renderRank(); renderVerify(); renderConclusion();
+  stopPlay();
+  setRound(totalRounds());
+}
+
+$("patDirect").addEventListener("click", () => selectPattern("direct"));
+$("patCommon").addEventListener("click", () => selectPattern("common"));
+$("patGuard").addEventListener("click", () => selectPattern("guard"));
+btnNext.addEventListener("click", () => { stopPlay(); setRound(state.round + 1); });
+btnPrev.addEventListener("click", () => { stopPlay(); setRound(state.round - 1); });
+btnReset.addEventListener("click", () => { stopPlay(); setRound(0); });
+btnPlay.addEventListener("click", () => {
+  if(state.playing){ stopPlay(); return; }
+  if(state.round >= totalRounds()) state.round = 0;
+  state.playing = true; btnPlay.textContent = "⏸ 暂停";
+  setRound(state.round);
+  state.timer = setTimeout(advance, stepDelay());
+});
+$("btnDemo").addEventListener("click", () => {
+  state.A = DEFAULT_A; state.B = DEFAULT_B;
+  $("valA").textContent = DEFAULT_A; $("valB").textContent = DEFAULT_B;
+  pickerA.set(DEFAULT_A, true); pickerB.set(DEFAULT_B, true);
+  paintPickerMarks();
+  resolve();
+});
+
+let pickerA = null, pickerB = null;
+function paintPickerMarks(){
+  if(!pickerA || !pickerB) return;
+  pickerA.setPieces({[state.A]: "🐴"});
+  pickerA.setBanner(state.A);
+  pickerB.setPieces({[state.B]: "🐴"});
+  pickerB.setBanner(state.B);
+}
+function buildPickers(){
+  pickerA = createPicker($("pickA"), state.A, alg => {
+    state.A = alg; $("valA").textContent = alg;
+    paintPickerMarks(); resolve();
+  }, {pieces: {[state.A]: "🐴"}, cell: 19});
+  pickerB = createPicker($("pickB"), state.B, alg => {
+    state.B = alg; $("valB").textContent = alg;
+    paintPickerMarks(); resolve();
+  }, {pieces: {[state.B]: "🐴"}, cell: 19});
+  paintPickerMarks();
+}
+
+/* ============================================================
+   启动
+   ============================================================ */
+buildPickers();
+resolve();
+btnReset.disabled = btnPrev.disabled;
+
+window.addEventListener("resize", () => {
+  const best = state.best;
+  const r = state.round;
+  if(best){
+    const ap = best.p1[Math.min(r, best.m1)], bp = best.p2[Math.min(r, best.m2)];
+    placePiece(pieceA, ap[0], ap[1], true);
+    placePiece(pieceB, bp[0], bp[1], true);
+  }
+});
+
+window.__two = {state, K};
+})();
+</script>
+</body>
+</html>
